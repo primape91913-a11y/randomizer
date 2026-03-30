@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Classroom Cold-Call Tool</title>
+    <style>
+        body { font-family: 'Segoe UI', system-ui, sans-serif; text-align: center; padding: 10px; margin: 0; background-color: #f0f2f5; color: #333; overflow-x: hidden; }
+        .container { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: block; width: 100%; max-width: 400px; margin: 0 auto; box-sizing: border-box; }
+        select { padding: 10px; font-size: 1.1rem; border-radius: 8px; margin-bottom: 15px; width: 100%; border: 2px solid #3498db; background: white; }
+        #result-container { background: #e8f4fd; border-radius: 10px; padding: 15px; margin: 15px 0; border: 1px dashed #3498db; }
+        #result { font-size: 5rem; font-weight: bold; color: #2c3e50; line-height: 1.2; margin: 5px 0; }
+        .label { font-size: 0.75rem; color: #7f8c8d; text-transform: uppercase; letter-spacing: 1px; font-weight: bold; }
+        button { padding: 12px; font-size: 1rem; cursor: pointer; border: none; border-radius: 8px; font-weight: bold; transition: all 0.2s; }
+        .btn-gen { background-color: #2ecc71; color: white; width: 100%; font-size: 1.3rem; padding: 18px; margin-bottom: 10px; box-shadow: 0 4px #27ae60; }
+        .btn-gen:active { transform: translateY(2px); box-shadow: 0 1px #27ae60; }
+        .secondary-controls { display: flex; gap: 10px; margin-bottom: 20px; }
+        .btn-undo { background-color: #f39c12; color: white; flex: 1; }
+        .btn-reset { background-color: #e74c3c; color: white; flex: 1; }
+        #history-box { text-align: left; background: #fafafa; padding: 12px; border-radius: 8px; border: 1px solid #eee; }
+        #history-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; min-height: 20px; }
+        .num-chip { background: #3498db; color: white; padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; cursor: pointer; }
+        .num-chip:hover { background: #c0392b; text-decoration: line-through; }
+        .stats { margin-top: 15px; font-size: 0.85rem; color: #95a5a6; font-weight: bold; }
+        .empty { color: #e74c3c; }
+        #modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 100; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box; }
+        .modal { background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 300px; text-align: center; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <label class="label">Period</label>
+        <select id="periodSelector" onchange="switchPeriod()">
+            <option value="p1">Period 1</option>
+            <option value="p2">Period 2</option>
+            <option value="p3">Period 3</option>
+            <option value="p4">Period 4</option>
+            <option value="p5">Period 5</option>
+        </select>
+
+        <div id="result-container">
+            <span class="label">Current Pick</span>
+            <div id="result">?</div>
+        </div>
+        
+        <button class="btn-gen" onclick="generateNumber()">NEXT STUDENT</button>
+
+        <div class="secondary-controls">
+            <button class="btn-undo" onclick="undoLast()">Undo</button>
+            <button class="btn-reset" onclick="showResetModal('manual')">Reset</button>
+        </div>
+
+        <div id="history-box">
+            <span class="label">Already Called (Click to Remove)</span>
+            <div id="history-list"></div>
+        </div>
+        
+        <div class="stats" id="counter">Remaining: 32 / 32</div>
+    </div>
+
+    <div id="modal-overlay">
+        <div class="modal">
+            <h3 id="modal-title">Reset Period?</h3>
+            <p id="modal-text">Clear all data for this class?</p>
+            <button class="btn-reset" style="width:100%; padding: 15px;" onclick="doReset()">Yes, Reset</button>
+            <button style="background:#bdc3c7; color:white; width:100%; margin-top:10px; padding:10px; border-radius:6px; border:none;" onclick="hideResetModal()">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        const MAX_STUDENTS = 32;
+        let currentPeriod = "p1";
+        let classData = JSON.parse(localStorage.getItem('classroomData')) || {
+            p1: { used: [], last: "?" }, p2: { used: [], last: "?" }, 
+            p3: { used: [], last: "?" }, p4: { used: [], last: "?" }, p5: { used: [] , last: "?" }
+        };
+
+        function updateUI() {
+            const data = classData[currentPeriod];
+            document.getElementById('result').innerText = data.last;
+            const listDiv = document.getElementById('history-list');
+            listDiv.innerHTML = ""; 
+            [...data.used].sort((a,b) => a-b).forEach(num => {
+                const chip = document.createElement('div');
+                chip.className = 'num-chip';
+                chip.innerText = num;
+                chip.onclick = () => removeSpecific(num);
+                listDiv.appendChild(chip);
+            });
+            if(data.used.length === 0) listDiv.innerHTML = "<span style='color:#ccc;'>No one called yet.</span>";
+            const remaining = MAX_STUDENTS - data.used.length;
+            const counterEl = document.getElementById('counter');
+            counterEl.innerText = `${remaining} students left`;
+            counterEl.className = remaining === 0 ? "stats empty" : "stats";
+        }
+
+        function switchPeriod() { currentPeriod = document.getElementById('periodSelector').value; updateUI(); }
+        function generateNumber() {
+            let data = classData[currentPeriod];
+            if (data.used.length >= MAX_STUDENTS) { showResetModal('auto'); return; }
+            let randomNumber;
+            do { randomNumber = Math.floor(Math.random() * MAX_STUDENTS) + 1; } while (data.used.includes(randomNumber));
+            data.used.push(randomNumber);
+            data.last = randomNumber;
+            save();
+        }
+        function undoLast() {
+            let data = classData[currentPeriod];
+            if (data.used.length === 0) return;
+            data.used.pop();
+            data.last = data.used.length > 0 ? data.used[data.used.length - 1] : "?";
+            save();
+        }
+        function removeSpecific(num) {
+            let data = classData[currentPeriod];
+            data.used = data.used.filter(n => n !== num);
+            if (data.last === num) data.last = data.used.length > 0 ? data.used[data.used.length - 1] : "?";
+            save();
+        }
+        function showResetModal(type) { 
+            document.getElementById('modal-title').innerText = (type === 'auto') ? "End of Roster!" : "Reset Period?";
+            document.getElementById('modal-text').innerText = (type === 'auto') ? "Everyone has been called. Reset the list?" : "This will clear all progress.";
+            document.getElementById('modal-overlay').style.display = 'flex'; 
+        }
+        function hideResetModal() { document.getElementById('modal-overlay').style.display = 'none'; }
+        function doReset() { classData[currentPeriod] = { used: [], last: "?" }; hideResetModal(); save(); }
+        function save() { localStorage.setItem('classroomData', JSON.stringify(classData)); updateUI(); }
+        updateUI();
+    </script>
+</body>
+</html>

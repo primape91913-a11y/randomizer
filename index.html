@@ -110,11 +110,8 @@
     </div>
 
     <script>
-        // TEMPORARY FORCE RESET (Delete these lines after the app unfreezes)
-localStorage.removeItem('classroomDataV3');
-localStorage.removeItem('classroomDataV4');
-        // Data Structure V4 (Includes 'excluded' arrays)
-        let appData = JSON.parse(localStorage.getItem('classroomDataV4'));
+        // Data Structure V5 - Bypasses all previous local storage
+        let appData = JSON.parse(localStorage.getItem('classroomDataV5'));
         
         if (!appData) {
             appData = {
@@ -127,7 +124,7 @@ localStorage.removeItem('classroomDataV4');
         }
 
         function save() {
-            localStorage.setItem('classroomDataV4', JSON.stringify(appData));
+            localStorage.setItem('classroomDataV5', JSON.stringify(appData));
             updateUI();
         }
 
@@ -159,7 +156,6 @@ localStorage.removeItem('classroomDataV4');
             
             if(currentClass.used.length === 0) listDiv.innerHTML = "<span style='color:#ccc;'>No seats called yet.</span>";
             
-            // Calculate true active students
             const validExcludedCount = currentClass.excluded.filter(n => n <= currentClass.max).length;
             const totalActiveSeats = currentClass.max - validExcludedCount;
             const remaining = totalActiveSeats - currentClass.used.length;
@@ -177,7 +173,6 @@ localStorage.removeItem('classroomDataV4');
         function generateNumber() {
             const currentClass = appData.classes[appData.currentId];
             
-            // 1. Build the pool of available seats (ignoring called and excluded)
             let available = [];
             for (let i = 1; i <= currentClass.max; i++) {
                 if (!currentClass.used.includes(i) && !currentClass.excluded.includes(i)) {
@@ -185,30 +180,23 @@ localStorage.removeItem('classroomDataV4');
                 }
             }
 
-            // If empty, trigger reset
             if (available.length === 0) { showResetModal('auto'); return; }
 
-            // 2. Identify the previous table (Groups of 4)
             let prevTable = null;
             if (currentClass.last !== "?") {
                 prevTable = Math.ceil(currentClass.last / 4);
             }
 
-            // Check if the ONLY seats left are at the exact same table
             let allRemainingSameTable = available.every(n => Math.ceil(n / 4) === prevTable);
 
-            // 3. The Hybrid Table Selection Logic
             let randomNumber;
             while (true) {
-                // Pick a random seat from available pool
                 randomNumber = available[Math.floor(Math.random() * available.length)];
                 let currentTable = Math.ceil(randomNumber / 4);
                 
-                // If it's a different table, OR if we're forced to pick the same table because it's all that's left
                 if (allRemainingSameTable || prevTable !== currentTable) {
                     break; 
                 } else {
-                    // It IS the same table. 10% chance to let it slip through!
                     if (Math.random() < 0.10) {
                         break;
                     }
@@ -255,7 +243,6 @@ localStorage.removeItem('classroomDataV4');
             document.getElementById('edit-name').value = currentClass.name;
             document.getElementById('edit-max').value = currentClass.max;
             
-            // Handle arrays to comma separated strings safely
             document.getElementById('edit-excluded').value = (currentClass.excluded || []).join(', ');
             document.getElementById('settings-modal').style.display = 'flex';
         }
@@ -264,7 +251,6 @@ localStorage.removeItem('classroomDataV4');
             const newName = document.getElementById('edit-name').value || "Unnamed Class";
             let newMax = parseInt(document.getElementById('edit-max').value) || 32;
             
-            // Parse excluded string into an array of integers
             let excludedRaw = document.getElementById('edit-excluded').value;
             let excludedArr = excludedRaw.split(',')
                                          .map(n => parseInt(n.trim()))
@@ -275,4 +261,47 @@ localStorage.removeItem('classroomDataV4');
             currentClass.max = newMax;
             currentClass.excluded = excludedArr;
             
-            // Cleanup
+            currentClass.used = currentClass.used.filter(num => num <= newMax && !excludedArr.includes(num));
+            if (currentClass.last > newMax || excludedArr.includes(currentClass.last)) currentClass.last = "?";
+
+            closeModals();
+            save();
+        }
+
+        function addNewClass() {
+            const newId = 'class_' + Date.now(); 
+            appData.classes[newId] = { name: "New Class", max: 32, excluded: [], used: [], last: "?" };
+            appData.currentId = newId; 
+            closeModals();
+            save();
+            openSettings(); 
+        }
+
+        function deleteClass() {
+            if (Object.keys(appData.classes).length <= 1) {
+                alert("You must have at least one class!");
+                return;
+            }
+            if (confirm("Are you sure you want to delete this class permanently?")) {
+                delete appData.classes[appData.currentId];
+                appData.currentId = Object.keys(appData.classes)[0]; 
+                closeModals();
+                save();
+            }
+        }
+
+        function closeModals() {
+            document.getElementById('alert-modal').style.display = 'none';
+            document.getElementById('settings-modal').style.display = 'none';
+        }
+
+        updateUI();
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+            .then(() => console.log("App is ready for offline use."))
+            .catch(err => console.log("Service Worker failed: ", err));
+        }
+    </script>
+</body>
+</html>

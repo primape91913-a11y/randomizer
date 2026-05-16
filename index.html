@@ -110,6 +110,9 @@
     </div>
 
     <script>
+        // TEMPORARY FORCE RESET (Delete these lines after the app unfreezes)
+localStorage.removeItem('classroomDataV3');
+localStorage.removeItem('classroomDataV4');
         // Data Structure V4 (Includes 'excluded' arrays)
         let appData = JSON.parse(localStorage.getItem('classroomDataV4'));
         

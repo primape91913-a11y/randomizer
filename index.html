@@ -38,8 +38,8 @@
         .empty { color: #e74c3c; }
 
         /* Modals */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 100; justify-content: center; align-items: center; padding: 20px; box-sizing: border-box; }
-        .modal { background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 320px; text-align: left; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 100; justify-content: center; align-items: center; padding: 10px; box-sizing: border-box; }
+        .modal { background: white; padding: 25px; border-radius: 12px; width: 100%; max-width: 320px; text-align: left; max-height: 90vh; overflow-y: auto; }
         .modal h3 { margin-top: 0; color: #2c3e50; text-align: center; }
         .modal input { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 1rem; }
         .modal button { width: 100%; padding: 12px; margin-top: 5px; }
@@ -60,11 +60,11 @@
         </div>
 
         <div id="result-container">
-            <span class="label">Current Pick</span>
+            <span class="label">Seat Picked</span>
             <div id="result">?</div>
         </div>
         
-        <button class="btn-gen" onclick="generateNumber()">NEXT STUDENT</button>
+        <button class="btn-gen" onclick="generateNumber()">NEXT SEAT</button>
 
         <div class="secondary-controls">
             <button class="btn-undo" onclick="undoLast()">Undo</button>
@@ -95,8 +95,11 @@
             <label class="label">Class Name</label>
             <input type="text" id="edit-name" placeholder="e.g., Period 6">
             
-            <label class="label">Total Number of Students</label>
+            <label class="label">Total Seats (Max)</label>
             <input type="number" id="edit-max" min="1" max="100">
+
+            <label class="label">Empty/Excluded Seats (Comma separated)</label>
+            <input type="text" id="edit-excluded" placeholder="e.g., 8, 28">
             
             <button class="btn-save" onclick="saveSettings()">💾 Save Changes</button>
             <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
@@ -107,30 +110,28 @@
     </div>
 
     <script>
-        // Data Structure
-        let appData = JSON.parse(localStorage.getItem('classroomDataV3'));
+        // Data Structure V4 (Includes 'excluded' arrays)
+        let appData = JSON.parse(localStorage.getItem('classroomDataV4'));
         
-        // If no data exists, create a default setup
         if (!appData) {
             appData = {
                 currentId: "class_1",
                 classes: {
-                    "class_1": { name: "Period 1", max: 32, used: [], last: "?" },
-                    "class_2": { name: "Period 2", max: 32, used: [], last: "?" }
+                    "class_1": { name: "Period 1", max: 32, excluded: [], used: [], last: "?" },
+                    "class_2": { name: "Period 2", max: 32, excluded: [], used: [], last: "?" }
                 }
             };
         }
 
         function save() {
-            localStorage.setItem('classroomDataV3', JSON.stringify(appData));
+            localStorage.setItem('classroomDataV4', JSON.stringify(appData));
             updateUI();
         }
 
         function updateUI() {
             const selector = document.getElementById('periodSelector');
-            selector.innerHTML = ""; // Clear dropdown
+            selector.innerHTML = ""; 
             
-            // Populate Dropdown
             for (const [id, data] of Object.entries(appData.classes)) {
                 const option = document.createElement('option');
                 option.value = id;
@@ -153,11 +154,15 @@
                 listDiv.appendChild(chip);
             });
             
-            if(currentClass.used.length === 0) listDiv.innerHTML = "<span style='color:#ccc;'>No one called yet.</span>";
+            if(currentClass.used.length === 0) listDiv.innerHTML = "<span style='color:#ccc;'>No seats called yet.</span>";
             
-            const remaining = currentClass.max - currentClass.used.length;
+            // Calculate true active students
+            const validExcludedCount = currentClass.excluded.filter(n => n <= currentClass.max).length;
+            const totalActiveSeats = currentClass.max - validExcludedCount;
+            const remaining = totalActiveSeats - currentClass.used.length;
+            
             const counterEl = document.getElementById('counter');
-            counterEl.innerText = `${remaining} students left (out of ${currentClass.max})`;
+            counterEl.innerText = `${remaining} seats left (Pool: ${totalActiveSeats})`;
             counterEl.className = remaining === 0 ? "stats empty" : "stats";
         }
 
@@ -168,12 +173,45 @@
 
         function generateNumber() {
             const currentClass = appData.classes[appData.currentId];
-            if (currentClass.used.length >= currentClass.max) { showResetModal('auto'); return; }
             
+            // 1. Build the pool of available seats (ignoring called and excluded)
+            let available = [];
+            for (let i = 1; i <= currentClass.max; i++) {
+                if (!currentClass.used.includes(i) && !currentClass.excluded.includes(i)) {
+                    available.push(i);
+                }
+            }
+
+            // If empty, trigger reset
+            if (available.length === 0) { showResetModal('auto'); return; }
+
+            // 2. Identify the previous table (Groups of 4)
+            let prevTable = null;
+            if (currentClass.last !== "?") {
+                prevTable = Math.ceil(currentClass.last / 4);
+            }
+
+            // Check if the ONLY seats left are at the exact same table
+            let allRemainingSameTable = available.every(n => Math.ceil(n / 4) === prevTable);
+
+            // 3. The Hybrid Table Selection Logic
             let randomNumber;
-            do { randomNumber = Math.floor(Math.random() * currentClass.max) + 1; } 
-            while (currentClass.used.includes(randomNumber));
-            
+            while (true) {
+                // Pick a random seat from available pool
+                randomNumber = available[Math.floor(Math.random() * available.length)];
+                let currentTable = Math.ceil(randomNumber / 4);
+                
+                // If it's a different table, OR if we're forced to pick the same table because it's all that's left
+                if (allRemainingSameTable || prevTable !== currentTable) {
+                    break; 
+                } else {
+                    // It IS the same table. 10% chance to let it slip through!
+                    if (Math.random() < 0.10) {
+                        break;
+                    }
+                }
+            }
+
             currentClass.used.push(randomNumber);
             currentClass.last = randomNumber;
             save();
@@ -198,7 +236,7 @@
 
         function showResetModal(type) { 
             document.getElementById('alert-title').innerText = (type === 'auto') ? "End of Roster!" : "Reset List?";
-            document.getElementById('alert-text').innerText = (type === 'auto') ? "Everyone has been called. Reset the list?" : "This will clear all progress for this class.";
+            document.getElementById('alert-text').innerText = (type === 'auto') ? "Every seat has been called. Reset the list?" : "This will clear all progress for this class.";
             document.getElementById('alert-modal').style.display = 'flex'; 
         }
 
@@ -213,6 +251,9 @@
             const currentClass = appData.classes[appData.currentId];
             document.getElementById('edit-name').value = currentClass.name;
             document.getElementById('edit-max').value = currentClass.max;
+            
+            // Handle arrays to comma separated strings safely
+            document.getElementById('edit-excluded').value = (currentClass.excluded || []).join(', ');
             document.getElementById('settings-modal').style.display = 'flex';
         }
 
@@ -220,52 +261,15 @@
             const newName = document.getElementById('edit-name').value || "Unnamed Class";
             let newMax = parseInt(document.getElementById('edit-max').value) || 32;
             
+            // Parse excluded string into an array of integers
+            let excludedRaw = document.getElementById('edit-excluded').value;
+            let excludedArr = excludedRaw.split(',')
+                                         .map(n => parseInt(n.trim()))
+                                         .filter(n => !isNaN(n) && n > 0 && n <= newMax);
+            
             const currentClass = appData.classes[appData.currentId];
             currentClass.name = newName;
             currentClass.max = newMax;
+            currentClass.excluded = excludedArr;
             
-            currentClass.used = currentClass.used.filter(num => num <= newMax);
-            if (currentClass.last > newMax) currentClass.last = "?";
-
-            closeModals();
-            save();
-        }
-
-        function addNewClass() {
-            const newId = 'class_' + Date.now(); 
-            appData.classes[newId] = { name: "New Class", max: 30, used: [], last: "?" };
-            appData.currentId = newId; 
-            closeModals();
-            save();
-            openSettings(); 
-        }
-
-        function deleteClass() {
-            if (Object.keys(appData.classes).length <= 1) {
-                alert("You must have at least one class!");
-                return;
-            }
-            if (confirm("Are you sure you want to delete this class permanently?")) {
-                delete appData.classes[appData.currentId];
-                appData.currentId = Object.keys(appData.classes)[0]; 
-                closeModals();
-                save();
-            }
-        }
-
-        function closeModals() {
-            document.getElementById('alert-modal').style.display = 'none';
-            document.getElementById('settings-modal').style.display = 'none';
-        }
-
-        updateUI();
-
-        // Register Offline Service Worker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js')
-            .then(() => console.log("App is ready for offline use."))
-            .catch(err => console.log("Service Worker failed: ", err));
-        }
-    </script>
-</body>
-</html>
+            // Cleanup
